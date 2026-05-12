@@ -446,16 +446,16 @@ with tab3:
     if 'results' not in st.session_state:
         st.info("กรุณาตรวจสอบสต็อคก่อนใน Tab แรกครับ")
     else:
-        st.subheader("⚙️ ตั้งค่าอีเมล")
+        st.subheader("📧 ส่งอีเมล")
+        from_email   = st.secrets["FROM_EMAIL"]
+        app_password = st.secrets["APP_PASSWORD"]
+        cc           = st.secrets.get("CC_EMAIL", "")
         with st.form("email_form"):
             c1,c2=st.columns(2)
             with c1:
-                from_email=st.text_input("อีเมลผู้ส่ง (Gmail)", value="sathaporn.phanphu@gmail.com")
-                app_password=st.text_input("App Password", type="password", placeholder="xxxx xxxx xxxx xxxx")
-            with c2:
                 to_factory=st.text_input("ถึงโรงงาน (To)", placeholder="factory@example.com")
+            with c2:
                 to_bangwa=st.text_input("ถึงบางหว้า (To)", placeholder="warehouse@example.com")
-            cc=st.text_input("CC (ถ้ามี)", value="sathaphon.p@nanyang.co.th")
             submitted=st.form_submit_button("📧 ส่งอีเมลทันที", type="primary", use_container_width=True)
 
         if submitted and from_email and app_password:
