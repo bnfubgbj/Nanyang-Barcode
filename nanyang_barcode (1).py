@@ -15,11 +15,89 @@ try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    import smtplib, json, ssl
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.base import MIMEBase
+    from email.mime.text import MIMEText
+    from email import encoders
+    try:
+        import keyring
+        HAS_KEYRING = True
+    except ImportError:
+        HAS_KEYRING = False
 except ImportError as e:
     import tkinter as tk, tkinter.messagebox as mb
     r = tk.Tk(); r.withdraw()
     mb.showerror("Error", f"Missing package: {e}\nrun: pip install openpyxl pdfplumber")
     raise SystemExit
+
+# Config file path
+CONFIG_DIR  = Path(os.environ.get('APPDATA', Path.home())) / 'NanyangBarcode'
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+CONFIG_DIR.mkdir(exist_ok=True)
+
+def load_config():
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+    except: return {}
+
+def save_config(cfg):
+    CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+
+def get_password():
+    if HAS_KEYRING:
+        return keyring.get_password('NanyangBarcode', 'email') or ''
+    cfg = load_config()
+    return cfg.get('_pw', '')
+
+def set_password(pw):
+    if HAS_KEYRING:
+        keyring.set_password('NanyangBarcode', 'email', pw)
+    else:
+        cfg = load_config(); cfg['_pw'] = pw; save_config(cfg)
+
+def detect_smtp(email):
+    domain = email.split('@')[-1].lower() if '@' in email else ''
+    if 'gmail' in domain:
+        return 'smtp.gmail.com', 587
+    elif any(x in domain for x in ['outlook','hotmail','live','office365']):
+        return 'smtp.office365.com', 587
+    else:
+        return 'smtp.office365.com', 587  # default corporate
+
+def send_email_with_attachment(cfg, subject, body, attachments):
+    """Send email with file attachments."""
+    from_email = cfg.get('from_email','')
+    password   = get_password()
+    smtp_host, smtp_port = detect_smtp(from_email)
+
+    msg = MIMEMultipart()
+    msg['From']    = from_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    for fpath in attachments:
+        if fpath and os.path.exists(fpath):
+            with open(fpath, 'rb') as f:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{Path(fpath).name}"')
+            msg.attach(part)
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.ehlo(); server.starttls(context=context); server.ehlo()
+        server.login(from_email, password)
+        # Send to factory
+        to_factory = cfg.get('to_factory','').strip()
+        if to_factory:
+            msg['To'] = to_factory
+            cc = cfg.get('cc','').strip()
+            if cc: msg['Cc'] = cc
+            recipients = [to_factory] + ([cc] if cc else [])
+            server.sendmail(from_email, recipients, msg.as_string())
+    return True
 
 # ══════════════════════════════════════════
 #  PASTEL COLORS
@@ -562,11 +640,52 @@ class App(tk.Tk):
 
         # Progress
         self.progress = ttk.Progressbar(body, mode='indeterminate', length=400)
-        self.progress.grid(row=5, column=0, columnspan=3, pady=(12,0), sticky='ew')
 
         self.status = tk.Label(body, text='', bg='#F0EEF8',
                                fg='#555', font=('Arial',9,'italic'))
-        self.status.grid(row=6, column=0, columnspan=3)
+
+        # ── Email settings (collapsible frame) ──
+        email_frame = tk.LabelFrame(body, text=' ⚙ ตั้งค่าอีเมล (กรอกครั้งแรกครั้งเดียว) ',
+                                    bg='#F0EEF8', font=('Arial',8), fg='#3A3270',
+                                    padx=10, pady=8)
+        email_frame.grid(row=5, column=0, columnspan=3, sticky='ew', pady=(8,0))
+
+        cfg = load_config()
+        self.email_from = tk.StringVar(value=cfg.get('from_email',''))
+        self.email_pw   = tk.StringVar(value=get_password())
+        self.email_factory  = tk.StringVar(value=cfg.get('to_factory',''))
+        self.email_bangwa   = tk.StringVar(value=cfg.get('to_bangwa',''))
+        self.email_cc       = tk.StringVar(value=cfg.get('cc',''))
+        self.auto_send      = tk.BooleanVar(value=cfg.get('auto_send', False))
+
+        fields = [
+            ('อีเมลผู้ส่ง (From)', self.email_from, False),
+            ('Password', self.email_pw, True),
+            ('ถึงโรงงาน (To)', self.email_factory, False),
+            ('ถึงบางหว้า (To)', self.email_bangwa, False),
+            ('CC (ถ้ามี)', self.email_cc, False),
+        ]
+        for fi, (lbl, var, is_pw) in enumerate(fields):
+            tk.Label(email_frame, text=lbl, bg='#F0EEF8',
+                     font=('Arial',8), fg='#555', anchor='w',
+                     width=20).grid(row=fi, column=0, sticky='w', pady=2)
+            show = '*' if is_pw else ''
+            tk.Entry(email_frame, textvariable=var, show=show,
+                     font=('Arial',8), width=35,
+                     relief='flat', bg='white', bd=1).grid(row=fi, column=1, sticky='ew', padx=(4,0), pady=2)
+        tk.Checkbutton(email_frame, text='ส่งอีเมลอัตโนมัติหลังสร้าง Excel',
+                       variable=self.auto_send, bg='#F0EEF8',
+                       font=('Arial',8), fg='#3A3270').grid(
+                       row=len(fields), column=0, columnspan=2, sticky='w', pady=(4,0))
+        email_frame.columnconfigure(1, weight=1)
+
+        # Progress
+        self.progress = ttk.Progressbar(body, mode='indeterminate', length=400)
+        self.progress.grid(row=6, column=0, columnspan=3, pady=(12,0), sticky='ew')
+
+        self.status = tk.Label(body, text='', bg='#F0EEF8',
+                               fg='#555', font=('Arial',9,'italic'))
+        self.status.grid(row=7, column=0, columnspan=3)
 
         # Run button
         self.btn = tk.Button(body, text='▶  สร้าง Excel',
@@ -575,7 +694,7 @@ class App(tk.Tk):
                              relief='flat', cursor='hand2',
                              padx=20, pady=10,
                              command=self._run)
-        self.btn.grid(row=7, column=0, columnspan=3, pady=(12,0))
+        self.btn.grid(row=8, column=0, columnspan=3, pady=(12,0))
 
         body.columnconfigure(1, weight=1)
 
@@ -673,10 +792,83 @@ class App(tk.Tk):
                 if ok: results.append(f'✓ บางหว้า: {Path(wp).name}')
                 else: results.append(f'✗ บางหว้า: {msg}')
 
+            # Save email config
+            cfg = load_config()
+            cfg['from_email']  = self.email_from.get().strip()
+            cfg['to_factory']  = self.email_factory.get().strip()
+            cfg['to_bangwa']   = self.email_bangwa.get().strip()
+            cfg['cc']          = self.email_cc.get().strip()
+            cfg['auto_send']   = self.auto_send.get()
+            save_config(cfg)
+            set_password(self.email_pw.get())
+
+            # Auto send email
+            email_results = []
+            if self.auto_send.get() and cfg['from_email']:
+                self._set_status('กำลังส่งอีเมล...')
+                today_str = datetime.date.today().strftime('%d/%m/%Y')
+                so_str = ', '.join(s['soNo'] for s in so_list)
+
+                # Send to factory
+                fp = os.path.join(out, f'barcode_factory_{datetime.date.today()}.xlsx')
+                if cfg['to_factory'] and os.path.exists(fp):
+                    try:
+                        msg_obj = MIMEMultipart()
+                        msg_obj['From']    = cfg['from_email']
+                        msg_obj['To']      = cfg['to_factory']
+                        msg_obj['Subject'] = f'รายการสินค้าติดบาร์โค้ด {so_str} — ส่ง {today_str}'
+                        if cfg['cc']: msg_obj['Cc'] = cfg['cc']
+                        body_txt = f'เรียน ทางโรงงาน\n\nขอแจ้งรายการสินค้าสำหรับติดบาร์โค้ด\nSO: {so_str}\nกำหนดส่ง: ตามไฟล์แนบ\n\nขอแสดงความนับถือ\nฝ่าย Sale Support — นันยางมาร์เก็ตติ้ง จำกัด'
+                        msg_obj.attach(MIMEText(body_txt, 'plain', 'utf-8'))
+                        with open(fp, 'rb') as f:
+                            part = MIMEBase('application','octet-stream')
+                            part.set_payload(f.read())
+                        encoders.encode_base64(part)
+                        part.add_header('Content-Disposition', f'attachment; filename="{Path(fp).name}"')
+                        msg_obj.attach(part)
+                        smtp_host, smtp_port = detect_smtp(cfg['from_email'])
+                        ctx = ssl.create_default_context()
+                        with smtplib.SMTP(smtp_host, smtp_port) as srv:
+                            srv.ehlo(); srv.starttls(context=ctx); srv.ehlo()
+                            srv.login(cfg['from_email'], get_password())
+                            recip = [cfg['to_factory']] + ([cfg['cc']] if cfg['cc'] else [])
+                            srv.sendmail(cfg['from_email'], recip, msg_obj.as_string())
+                        email_results.append('✓ ส่งอีเมลโรงงานแล้ว')
+                    except Exception as e:
+                        email_results.append(f'✗ ส่งอีเมลโรงงานไม่ได้: {e}')
+
+                # Send to bangwa
+                wp = os.path.join(out, f'barcode_bangwa_{datetime.date.today()}.xlsx')
+                if cfg['to_bangwa'] and os.path.exists(wp):
+                    try:
+                        msg_obj2 = MIMEMultipart()
+                        msg_obj2['From']    = cfg['from_email']
+                        msg_obj2['To']      = cfg['to_bangwa']
+                        msg_obj2['Subject'] = f'รายการสินค้าหยิบออกจากโกดัง {so_str} — ส่ง {today_str}'
+                        if cfg['cc']: msg_obj2['Cc'] = cfg['cc']
+                        body_txt2 = f'เรียน ทีมโกดังบางหว้า\n\nขอแจ้งรายการสินค้าที่ต้องหยิบออกจากโกดัง\nSO: {so_str}\nกำหนดส่ง: ตามไฟล์แนบ\n\nขอแสดงความนับถือ\nฝ่าย Sale Support — นันยางมาร์เก็ตติ้ง จำกัด'
+                        msg_obj2.attach(MIMEText(body_txt2, 'plain', 'utf-8'))
+                        with open(wp, 'rb') as f:
+                            part2 = MIMEBase('application','octet-stream')
+                            part2.set_payload(f.read())
+                        encoders.encode_base64(part2)
+                        part2.add_header('Content-Disposition', f'attachment; filename="{Path(wp).name}"')
+                        msg_obj2.attach(part2)
+                        smtp_host, smtp_port = detect_smtp(cfg['from_email'])
+                        ctx = ssl.create_default_context()
+                        with smtplib.SMTP(smtp_host, smtp_port) as srv:
+                            srv.ehlo(); srv.starttls(context=ctx); srv.ehlo()
+                            srv.login(cfg['from_email'], get_password())
+                            recip2 = [cfg['to_bangwa']] + ([cfg['cc']] if cfg['cc'] else [])
+                            srv.sendmail(cfg['from_email'], recip2, msg_obj2.as_string())
+                        email_results.append('✓ ส่งอีเมลบางหว้าแล้ว')
+                    except Exception as e:
+                        email_results.append(f'✗ ส่งอีเมลบางหว้าไม่ได้: {e}')
+
             self._set_status('เสร็จแล้ว ✓', '#1A7A3F')
-            msg = 'สร้างไฟล์เรียบร้อย!\n\n' + '\n'.join(results) + f'\n\nบันทึกที่: {out}'
+            all_results = results + email_results
+            msg = 'สร้างและส่งไฟล์เรียบร้อย!\n\n' + '\n'.join(all_results) + f'\n\nบันทึกที่: {out}'
             self.after(0, lambda: messagebox.showinfo('เสร็จแล้ว!', msg))
-            # Open output folder
             if os.path.exists(out):
                 os.startfile(out)
 
