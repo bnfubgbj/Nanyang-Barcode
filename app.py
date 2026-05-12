@@ -239,79 +239,104 @@ def write_block(ws,sr,sc,title,colors,sizes,data,do_roundup):
     ws.row_dimensions[sub_r].height=16
     return sub_r+1
 
-def build_excel(all_items,is_factory,all_so,all_po,all_dates):
-    dest_label='โรงงาน (ติดบาร์โค้ด)' if is_factory else 'โกดังบางหว้า (หยิบออก)'
-    today=datetime.date.today().strftime('%d/%m/%Y')
-    MODEL_ORDER=[('205S','ผ้าใบ 205-S'),('200','ฟองน้ำ 200'),('212','ฟองน้ำ 212')]
-    model_sizes={}
-    for mid,_ in MODEL_ORDER:
-        szs=sorted(set(float(str(i['size']).split('/')[0]) for i in all_items if i['model']==mid))
-        if szs: model_sizes[mid]=szs
-    max_n=max((len(v) for v in model_sizes.values()),default=6)
-    TC=max_n+2
-    wb=Workbook(); wb.remove(wb.active)
-    ws=wb.create_sheet('รายการสินค้า')
-    ws.sheet_view.showGridLines=False
+def build_excel(all_items, is_factory, all_so, all_po, all_dates):
+    dest_label = 'โรงงาน (ติดบาร์โค้ด)' if is_factory else 'โกดังบางหว้า (หยิบออก)'
+    today      = datetime.date.today().strftime('%d/%m/%Y')
+    MODEL_ORDER= [('205S','ผ้าใบ 205-S'),('200','ฟองน้ำ 200'),('212','ฟองน้ำ 212')]
 
-    def banner(r,txt,bg,fc='FFFFFFFF',sz=9,bold=True,italic=False):
-        ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=TC)
-        x=ws.cell(r,1,f'  {txt}')
-        x.font=Font(name='Arial',size=sz,bold=bold,color=fc,italic=italic)
-        x.fill=PatternFill('solid',start_color=bg)
-        x.alignment=Alignment(horizontal='left',vertical='center')
-        return r+1
+    wb = Workbook(); wb.remove(wb.active)
 
-    r=1
-    r=banner(r,f'นันยางมาร์เก็ตติ้ง — รายการสั่งสินค้า {dest_label}',P['TITLE'],'FFFFFFFF',11)
-    ws.row_dimensions[r-1].height=26
-    r=banner(r,f'SO: {all_so}  |  {all_po}  |  กำหนดส่ง: {all_dates}  |  สร้าง: {today}  |  VENDOR: 600635',P['META'],'FFB3D4FF',8,italic=True)
-    ws.row_dimensions[r-1].height=14
-    note='* = ปัดเพิ่มให้ครบโหล (12 คู่)' if is_factory else 'จำนวนออกตามจริงตาม SO'
-    r=banner(r,note,P['NOTE'],'FF90CAF9',8,italic=True); ws.row_dimensions[r-1].height=13
-    r+=1
-    for mid,mname in MODEL_ORDER:
-        m_items=[i for i in all_items if i['model']==mid]
-        if not m_items: continue
-        sizes=model_sizes[mid]; colors=sorted(set(i['color'] for i in m_items))
-        N=len(sizes); BCOLS=1+N+1; GAP=2; R_OFF=BCOLS+GAP
-        ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=TC)
-        mh=ws.cell(r,1,f'  {mname}')
-        mh.font=Font(name='Arial',size=10,bold=True,color='FFFFFFFF')
-        mh.fill=PatternFill('solid',start_color='FF0D47A1')
-        mh.alignment=Alignment(horizontal='left',vertical='center')
-        ws.row_dimensions[r].height=20; r+=1
-        so_grps={}
-        for i in m_items:
-            k=i['soNo']; so_grps.setdefault(k,{'title':f"{i['customer']}  ({k})",'data':{}})
-            c2,s2=i['color'],float(str(i['size']).split('/')[0])
-            so_grps[k]['data'].setdefault(c2,{}); so_grps[k]['data'][c2][s2]=so_grps[k]['data'][c2].get(s2,0)+i['qty']
-        # Aggregate all SOs
-        agg_data={c:{s:sum((so_grps[k]['data'].get(c) or {}).get(s,0) for k in so_grps) for s in sizes} for c in colors}
-        for pi in range(0,1,2):
-            dl={c:{s:agg_data[c][s] for s in sizes} for c in colors}
-            next_r=write_block(ws,r,1,f'รวมทุก SO ({", ".join(so_grps.keys())})',colors,sizes,dl,is_factory)
-            r=next_r+1
-        r+=1
-    # Summary sheet
-    ws2=wb.create_sheet('สรุปรายการ')
-    ws2.sheet_view.showGridLines=False
-    hdrs=['SO','ลูกค้า','กำหนดส่ง','รุ่น','สี','เบอร์','SO (คู่)','สั่งจริง (คู่)','ปัดเพิ่ม']
+    # ── แยก sheet ตามลูกค้า ──
+    customers = sorted(set(i.get('customer','ไม่ทราบ') for i in all_items))
+
+    for cust in customers:
+        cust_items = [i for i in all_items if i.get('customer','ไม่ทราบ') == cust]
+        if not cust_items: continue
+
+        cust_so    = ', '.join(sorted(set(i['soNo'] for i in cust_items)))
+        cust_po    = ', '.join(sorted(set(i['poNo'] for i in cust_items if i['poNo']!='-')))
+        cust_dates = ', '.join(sorted(set(i['delivery'] for i in cust_items if i['delivery']!='-')))
+
+        model_sizes = {}
+        for mid,_ in MODEL_ORDER:
+            szs = sorted(set(float(str(i['size']).split('/')[0]) for i in cust_items if i['model']==mid))
+            if szs: model_sizes[mid] = szs
+        max_n = max((len(v) for v in model_sizes.values()), default=6)
+        TC = max_n + 2
+
+        ws = wb.create_sheet(cust[:28])
+        ws.sheet_view.showGridLines = False
+
+        def banner(r, txt, bg, fc='FFFFFFFF', sz=9, bold=True, italic=False):
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=TC)
+            x = ws.cell(r, 1, f'  {txt}')
+            x.font = Font(name='Arial', size=sz, bold=bold, color=fc, italic=italic)
+            x.fill = PatternFill('solid', start_color=bg)
+            x.alignment = Alignment(horizontal='left', vertical='center')
+            return r+1
+
+        r = 1
+        r = banner(r, f'นันยางมาร์เก็ตติ้ง — {dest_label} | ลูกค้า: {cust}', P['TITLE'], 'FFFFFFFF', 11)
+        ws.row_dimensions[r-1].height = 26
+        r = banner(r, f'SO: {cust_so}  |  {cust_po}  |  กำหนดส่ง: {cust_dates}  |  สร้าง: {today}  |  VENDOR: 600635', P['META'], 'FFB3D4FF', 8, italic=True)
+        ws.row_dimensions[r-1].height = 14
+        note = '* = ปัดเพิ่มให้ครบโหล (12 คู่)' if is_factory else 'จำนวนออกตามจริงตาม SO'
+        r = banner(r, note, P['NOTE'], 'FF90CAF9', 8, italic=True)
+        ws.row_dimensions[r-1].height = 13
+        r += 1
+
+        for mid, mname in MODEL_ORDER:
+            m_items = [i for i in cust_items if i['model'] == mid]
+            if not m_items: continue
+            sizes  = model_sizes[mid]
+            colors = sorted(set(i['color'] for i in m_items))
+            N = len(sizes)
+
+            # Model section header
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=TC)
+            mh = ws.cell(r, 1, f'  {mname}')
+            mh.font = Font(name='Arial', size=10, bold=True, color='FFFFFFFF')
+            mh.fill = PatternFill('solid', start_color='FF0D47A1')
+            mh.alignment = Alignment(horizontal='left', vertical='center')
+            ws.row_dimensions[r].height = 20; r += 1
+
+            # Aggregate all SOs for this customer+model
+            agg = {}
+            for color in colors:
+                agg[color] = {}
+                for sz in sizes:
+                    agg[color][sz] = sum(
+                        i['qty'] for i in m_items
+                        if i['color']==color and float(str(i['size']).split('/')[0])==sz
+                    )
+            next_r = write_block(ws, r, 1, f'รวมทุก SO ({cust_so})', colors, sizes, agg, is_factory)
+            r = next_r + 1
+        r += 1
+
+    # ── Sheet สรุปรายการ ──
+    ws2 = wb.create_sheet('สรุปรายการ')
+    ws2.sheet_view.showGridLines = False
+    hdrs = ['SO','ลูกค้า','กำหนดส่ง','รุ่น','สี','เบอร์','SO (คู่)','สั่งจริง (คู่)','ปัดเพิ่ม']
     for ci,h in enumerate(hdrs,1): cl(ws2,1,ci,h,P['COL_HDR'],'FFFFFFFF',True)
-    ws2.row_dimensions[1].height=16
+    ws2.row_dimensions[1].height = 16
     ts=to=tp=0
     for ri2,item in enumerate(all_items,2):
         if is_factory: ord_,pad=roundup12(item['qty']); pad_n=ord_-item['qty'] if pad else 0
         else: ord_,pad,pad_n=item['qty'],False,0
         bg=P['ROW_A'] if ri2%2==0 else P['ROW_B']
         sz2=float(str(item['size']).split('/')[0]); sz_d=int(sz2) if sz2==int(sz2) else sz2
-        vals=[item['soNo'],item['customer'],item['delivery'],item['model'],item['color'],sz_d,item['qty'],ord_,pad_n]
+        vals=[item['soNo'],item.get('customer',''),item['delivery'],item['model'],
+              item['color'],sz_d,item['qty'],ord_,pad_n]
         for ci,v in enumerate(vals,1):
-            cl(ws2,ri2,ci,v,bg,P['RED'] if ci==8 and pad else P['DARK'],bold=(ci==8 and pad),ha='left' if ci<=5 else 'center')
+            cl(ws2,ri2,ci,v,bg,P['RED'] if ci==8 and pad else P['DARK'],
+               bold=(ci==8 and pad),ha='left' if ci<=5 else 'center')
         ts+=item['qty']; to+=ord_; tp+=pad_n
     tr=len(all_items)+2
     for ci,v in enumerate(['']*5+[ts,to,tp,''],1):
         if ci==5: v='รวม'
-        cl(ws2,tr,ci,v,P['GRAND'],P['RED'] if ci==8 and tp else 'FFFFFFFF',True,ha='right' if ci==5 else 'center')
+        cl(ws2,tr,ci,v,P['GRAND'],P['RED'] if ci==8 and tp else 'FFFFFFFF',True,
+           ha='right' if ci==5 else 'center')
+
     for sheet in wb.worksheets: auto_fit(sheet)
     buf=io.BytesIO(); wb.save(buf); buf.seek(0); return buf.getvalue()
 
@@ -425,12 +450,12 @@ with tab3:
         with st.form("email_form"):
             c1,c2=st.columns(2)
             with c1:
-                from_email=st.text_input("อีเมลผู้ส่ง (Gmail)", placeholder="your@gmail.com")
+                from_email=st.text_input("อีเมลผู้ส่ง (Gmail)", value="sathaporn.phanphu@gmail.com")
                 app_password=st.text_input("App Password", type="password", placeholder="xxxx xxxx xxxx xxxx")
             with c2:
                 to_factory=st.text_input("ถึงโรงงาน (To)", placeholder="factory@example.com")
                 to_bangwa=st.text_input("ถึงบางหว้า (To)", placeholder="warehouse@example.com")
-            cc=st.text_input("CC (ถ้ามี)")
+            cc=st.text_input("CC (ถ้ามี)", value="sathaphon.p@nanyang.co.th")
             submitted=st.form_submit_button("📧 ส่งอีเมลทันที", type="primary", use_container_width=True)
 
         if submitted and from_email and app_password:
