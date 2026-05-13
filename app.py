@@ -453,8 +453,8 @@ with tab3:
         with st.form("email_form"):
             c1,c2=st.columns(2)
             with c1:
-                to_factory=st.text_input("ถึงโรงงาน (To)", value="Chumporn.J@nanyang.co.th; Avirute.B@nanyang.co.th; Sukanya.S@nanyang.co.th")
-                cc_factory=st.text_input("CC (โรงงาน)", value="Kanya.L@nanyang.co.th; Pornpun.R@nanyang.co.th; Sakda.C@nanyang.co.th; Sathaphon.p@nanyang.co.th; Supachai.M@nanyang.co.th; Thananporn.U@nanyang.co.th; Thanida.N@nanyang.co.th; Thawanhathai.S@nanyang.co.th; Werawit.K@nanyang.co.th")
+                to_factory=st.text_input("ถึงโรงงาน (To)", value="Sukanya.S@nanyang.co.th")
+                cc_factory=st.text_input("CC (โรงงาน)", value="")
             with c2:
                 to_bangwa=st.text_input("ถึงบางหว้า (To)", value="Sukanya.S@nanyang.co.th")
             submitted=st.form_submit_button("📧 ส่งอีเมลทันที", type="primary", use_container_width=True)
