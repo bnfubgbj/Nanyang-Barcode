@@ -453,9 +453,10 @@ with tab3:
         with st.form("email_form"):
             c1,c2=st.columns(2)
             with c1:
-                to_factory=st.text_input("ถึงโรงงาน (To)", placeholder="factory@example.com")
+                to_factory=st.text_input("ถึงโรงงาน (To)", value="Chumporn.J@nanyang.co.th; Avirute.B@nanyang.co.th; Sukanya.S@nanyang.co.th")
+                cc_factory=st.text_input("CC (โรงงาน)", value="Kanya.L@nanyang.co.th; Pornpun.R@nanyang.co.th; Sakda.C@nanyang.co.th; Sathaphon.p@nanyang.co.th; Supachai.M@nanyang.co.th; Thananporn.U@nanyang.co.th; Thanida.N@nanyang.co.th; Thawanhathai.S@nanyang.co.th; Werawit.K@nanyang.co.th")
             with c2:
-                to_bangwa=st.text_input("ถึงบางหว้า (To)", placeholder="warehouse@example.com")
+                to_bangwa=st.text_input("ถึงบางหว้า (To)", value="Sukanya.S@nanyang.co.th")
             submitted=st.form_submit_button("📧 ส่งอีเมลทันที", type="primary", use_container_width=True)
 
         if submitted and from_email and app_password:
@@ -464,10 +465,11 @@ with tab3:
             all_dates=', '.join(sorted(set(r['delivery'] for r in results if r['delivery']!='-')))
             today=datetime.date.today().strftime('%d/%m/%Y')
 
-            def send(to_addr, subject, body_txt, xlsx_bytes, fname):
+            def send(to_addr, subject, body_txt, xlsx_bytes, fname, cc_override=None):
                 msg=MIMEMultipart()
                 msg['From']=from_email; msg['To']=to_addr; msg['Subject']=subject
-                if cc: msg['Cc']=cc
+                use_cc = cc_override if cc_override else cc
+                if use_cc: msg['Cc']=use_cc
                 msg.attach(MIMEText(body_txt,'plain','utf-8'))
                 part=MIMEBase('application','octet-stream'); part.set_payload(xlsx_bytes)
                 encoders.encode_base64(part)
@@ -478,7 +480,7 @@ with tab3:
                 with smtplib.SMTP('smtp.gmail.com',587) as srv:
                     srv.ehlo(); srv.starttls(context=ctx); srv.ehlo()
                     srv.login(from_email,pw)
-                    recip=[to_addr]+([cc] if cc else [])
+                    recip=[to_addr]+([use_cc] if use_cc else [])
                     srv.sendmail(from_email,recip,msg.as_string())
 
             sent=[]
@@ -489,7 +491,8 @@ with tab3:
                              f'รายการสินค้าติดบาร์โค้ด {all_so} — ส่ง {all_dates}',
                              f'เรียน ทางโรงงาน\n\nขอแจ้งรายการสินค้าสำหรับติดบาร์โค้ด\nSO: {all_so}\nกำหนดส่ง: {all_dates}\n\nขอแสดงความนับถือ\nฝ่าย Sale Support — นันยางมาร์เก็ตติ้ง จำกัด',
                              st.session_state['factory_xlsx'],
-                             f'barcode_factory_{datetime.date.today()}.xlsx')
+                             f'barcode_factory_{datetime.date.today()}.xlsx',
+                             cc_override=cc_factory)
                         sent.append('✅ ส่งอีเมลโรงงานสำเร็จ')
                     except Exception as e:
                         sent.append(f'❌ ส่งโรงงานไม่ได้: {e}')
